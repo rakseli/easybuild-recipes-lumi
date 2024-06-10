@@ -63,7 +63,7 @@ eb --copy-ec <module_you_want_to_extend> ./recipes/
         - the `conda-python-distributed` will use these
         - comment out `#export ROCR_VISIBLE_DEVICES=$SLURM_LOCALID`
         - add `export LOCAL_RANK=\$SLURM_LOCALID`
-    - other runscripts if needed
+    - edit other runscripts if needed
 4. Add `local_pip_requirements` variable to recipe
 ```
 local_pip_requirements = """
