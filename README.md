@@ -50,10 +50,10 @@ eb --copy-ec <module_you_want_to_extend> ./recipes/
  - List of available containers can be found [here](https://lumi-supercomputer.github.io/LUMI-EasyBuild-docs/p/PyTorch/#singularity-containers-with-modules-for-binding-and-extras), select one with possibility add extra packages
 3. Change the variables
 - Replace
-    - `local_sif = <sif_you_are_using>
-    - `local_c_rocm_version=<sif_rocm_version>
-    - `local_c_PyTorch_version = <sif_torch_version>
-    - `local_dockerhash=<sif_docker_hash>
+    - `local_sif = <sif_you_are_using>`
+    - `local_c_rocm_version=<sif_rocm_version>`
+    - `local_c_PyTorch_version = <sif_torch_version>`
+    - `local_dockerhash=<sif_docker_hash>`
 - Remove
     - `local_c_flashattention_version`
     - `local_c_xformers_version`
@@ -97,6 +97,7 @@ eb recipes/<your_modified_recipe>.eb
 ```bash
 module spider PyTorch/<your_module_name_check_from_SW_in_EBU_USER_PREFIX>
 ```
+- In general, the module will be available in all versions of the  LUMI stack and in the CrayEnv stack, but may be worth of checking if you run into problems
 8. Check function:
 - List the Python packages in the container
 - right module name can be found in `$EBU_USER_PREFIX/EasyBuild/SW/container/PyTorch`
