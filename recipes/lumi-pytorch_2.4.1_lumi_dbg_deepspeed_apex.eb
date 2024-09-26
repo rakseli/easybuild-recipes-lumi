@@ -1,0 +1,387 @@
+# Developed by Kurt Lust and Mihkel Tiks for LUMI, Adapted to CSC containers by Akseli Reunamo
+#DOC The container also fully assists the procedure to add extra packages in a Python virtual environment.
+#DOC CSC containers does the Python installs to default environment
+#DOC This version works with $WITH_VENV for initialisation of the 
+#DOC Python venv.
+
+easyblock = 'MakeCp'
+
+local_c_rocm_version =    '6.1.0'
+local_c_python_mm =       '3.10'
+local_c_PyTorch_version = '2.4.1'
+local_date =              '20240923'
+local_c_DeepSpeed_version =      '0.15.1'
+local_c_flashattention_version = '2.6.3'
+local_c_apex_version = '1.13.2' 
+local_xformers_version = '0.0.28+4e51efa4.d20240904'
+local_venv = 'pytorch'
+
+name =          'PyTorch'
+version =       f'{local_c_PyTorch_version}-rocm-{local_c_rocm_version}-apex-{local_c_apex_version}-deepspeed-{local_c_DeepSpeed_version}-{local_date}'
+
+local_sif = 'pytorch-2.4.1-lumi-dbg-deepspeed-apex.sif'
+
+homepage = 'https://pytorch.org/'
+
+whatis = [
+    'Description: PyTorch with additional packages, container based on CSC\'s "pytorch_2.4.1_lumi_dbg.sif" (claimed 2024-09-23)',
+    ''
+]
+
+files_to_copy = [
+    ([local_sif],    '.'),
+#    ([local_docker], 'share/docker-defs/')    
+]
+
+description = f"""
+This module provides a container with PyTorch {local_c_PyTorch_version} on Python {local_c_python_mm}. It also contains 
+DeepSpeed {local_c_DeepSpeed_version}, FlashAttention {local_c_flashattention_version}, Apex {local_c_apex_version} and xformers {local_xformers_version}
+
+The module defines a number of environment variables available outside the
+container:
+
+*   SIF : The full path and name of the Singularity SIF file 
+    to use with singularity exec etc.
+*   SINGULAIRTY_BINDPATH: Mounts the necessary directories from the system,
+    including /users, /project, /scratch and /flash so that you should be
+    able to use your regular directories in the container.
+*   RUNSCRIPTS: The directory with some sample
+    runscripts.
+*   CONTAINERROOT: Root directory of the container installation. Alternative
+    for EBROOTPYTHORCH.
+    
+There are also a number of environment variables available inside the container.
+These are not strictly needed though as the module already ensures that all
+necessary environment variables are set to activate the Conda environment in
+the container and on top of that the virtual environment for additional packages.
+
+*   WITH_VENV: Command to execute to activate the pre-created Python virtual
+    environment.
+    
+Outside of the container, the following commands are available:
+
+*   start-shell: To start a bash shell in the container. Arguments can be used
+    to, e.g., tell it to start a command. Without arguments, the conda and Python 
+    virtual environments will be initialised, but this is not the case as soon as
+    arguments are used.
+*   make-squashfs: Make the user-software.squashfs file that would then be mounted
+    in the container after reloading the module. This will enhance performance if
+    the extra installation in user-software contains a lot of files.
+*   unmake-squashfs: Unpack the user-software.squashfs file into the user-software
+    subdirectory of $CONTAINERROOT to enable installing additional packages.
+    
+Inside the container, the following scripts are available in /runscripts
+(and can be checked or edited outside the container in $CONTAINERROOT/runscripts):
+
+*   python-simple: Start Python in the Python venv environment.
+*   python-distributed: Example script that can be used to start Python
+    in a distributed way compatible with the needs of PyTorch. You should pass
+    the Python commands to be executed with the options that the python executable
+    would take.
+*   get-master: A script used by python-distributed.
+
+Note that any change that you make to files in $CONTAINERROOT will be fully erased
+whenever you reinstall the container with EasyBuild so backup all changes or 
+additions!
+"""
+
+docurls = [
+    'DeepSpeed web site: https://www.deepspeed.ai/'    
+]
+
+toolchain = SYSTEM
+
+sources = [
+    {
+        'filename':    local_sif,
+        'extract_cmd': '/bin/cp -L %s .'
+    },
+
+]
+
+skipsteps = ['build']
+
+#
+# Code for scripts in the bin subdirectory
+#
+
+local_bin_start_shell = """
+#!/bin/bash -e
+
+# Run application
+if [[ -f "/.singularity.d/Singularity" ]] 
+then
+    # In a singularity container, just in case a user would add this to the path.
+    exec bash "\$@"
+else
+    # Not yet in the container
+    singularity exec \$SIF bash "\$@"
+fi
+
+"""
+
+local_bin_make_squashfs = """
+#!/bin/bash -e
+
+if [[ -f "/.singularity.d/Singularity" ]] 
+then
+    # In a singularity container, just in case a user would add this to the path.
+    >&2 echo 'The make-squashfs command should not be run in the container.'
+    exit 1
+fi
+
+cd "%(installdir)s"
+
+if [[ ! -d "user-software" ]]
+then
+    >&2 echo -e 'The \$CONTAINERROOT/user-software subdirectory does not exist, so there is nothing to put into the SquashFS file.'
+    exit 2
+fi
+
+if [[ -f "user-software.squashfs" ]]
+then
+    >&2 echo -e '\$CONTAINERROOT/user-software.squashfs already exists. Please remove the file by' \
+                '\\nhand if you are sure you wish to proceed and re-run the make-squashfs command.'
+    exit 3
+fi
+
+mksquashfs user-software user-software.squashfs -processors 1 -no-progress |& grep -v Unrecognised
+
+echo -e '\\nCreated \$CONTAINERROOT/user-software.squashfs from \$CONTAINERROOT/user-software.' \
+        '\\nYou need to reload the PyTorch module to ensure that the software is now mounted' \
+        '\\nfrom \$CONTAINERROOT/user-software.squashfs. Note that /user-software in the' \
+        '\\ncontainer will then be a read-only directory.' \
+        '\\nAfter reloading the module, you can also remove the \$CONTAINERROOT/user-software' \
+        '\\nsubdirectory if you so wish.\\n'
+
+"""
+
+local_bin_unmake_squashfs = """
+#!/bin/bash -e
+
+if [[ -f "/.singularity.d/Singularity" ]] 
+then
+    # In a singularity container, just in case a user would add this to the path.
+    >&2 echo 'The unmake-squashfs command should not be run in the container.'
+    exit 1
+fi
+
+cd "%(installdir)s"
+
+if [[ ! -f "user-software.squashfs" ]]
+then
+    >&2 echo -e '\$CONTAINERROOT/user-software.squashfs does not exist so cannot uncompress it.'
+    exit 2
+fi
+
+if [[ -d "user-software" ]]
+then
+    >&2 echo -e 'The \$CONTAINERROOT/user-software subdirectory already exists. Please remove this directory by hand' \
+                '(rm -r \$CONTAINERROOT/user-software) if you are sure you wish to proceed and re-run the unmake-squashfs command.'
+    exit 3
+fi
+
+unsquashfs -d ./user-software user-software.squashfs
+
+echo -e '\\nCreated \$CONTAINERROOT/user-software subdirectory from \$CONTAINERROOT/user-software.squasfs.' \
+        '\\nYou need to reload the PyTorch module to ensure that the software is now mounted from the' \
+        '\\n\$CONTAINERROOT/user-software directory and can now write to /user-software in the container.' \
+        '\\nYou can then also remove the \$CONTAINERROOT/user-software.squashfs file if you so wish.\\n'
+
+"""
+
+#
+# Code for scripts in the runscript subdirectory
+#
+
+local_runscript_init_venv=f"""
+#
+# Source this file to initialize
+# predefined virtual environment in the container.
+#
+# This script is still useful to initialise the environment when the
+# module is not loaded, e.g., to execute commands in the `postinstallcmds` section.
+#
+source /user-software/venv/{local_venv}/bin/activate
+
+"""
+
+
+
+local_runscript_python_simple="""
+#!/bin/bash -e
+eval "\$WITH_VENV"
+# Run application
+python "\$@"
+
+"""
+
+local_runscript_python_distributed="""
+#!/bin/bash -e
+eval "\$WITH_VENV"
+# Make sure GPUs are up
+if [ \$SLURM_LOCALID -eq 0 ] ; then
+    rocm-smi
+fi
+sleep 2
+# MIOPEN needs some initialisation for the cache as the default location
+# does not work on LUMI as Lustre does not provide the necessary features.
+export MIOPEN_USER_DB_PATH="/tmp/\$(whoami)-miopen-cache-\$SLURM_NODEID"
+export MIOPEN_CUSTOM_CACHE_DIR=\$MIOPEN_USER_DB_PATH
+
+# Set MIOpen cache to a temporary folder.
+if [ \$SLURM_LOCALID -eq 0 ] ; then
+    rm -rf \$MIOPEN_USER_DB_PATH
+    mkdir -p \$MIOPEN_USER_DB_PATH
+fi
+sleep 2
+
+# Set interfaces to be used by RCCL.
+# This is needed as otherwise RCCL tries to use a network interface it has
+# noa ccess to on LUMI.
+export NCCL_NET_GDR_LEVEL=3
+export NCCL_IFNAME=hsn
+export CUDA_DEVICE_MAX_CONNECTIONS=1
+# Set ROCR_VISIBLE_DEVICES so that each task uses the proper GPU
+#this doesn't work if megatron is used
+#export ROCR_VISIBLE_DEVICES=$SLURM_LOCALID
+
+# Report affinity to check 
+echo "Rank \$SLURM_PROCID --> \$(taskset -p \$\$); GPU \$ROCR_VISIBLE_DEVICES"
+
+# The usual PyTorch initialisations (also needed on NVIDIA)
+# Note that since we fix the port ID it is not possible to run, e.g., two
+# instances via this script using half a node each.
+export MASTER_ADDR=\$(/runscripts/get-master "\$SLURM_NODELIST")
+export MASTER_PORT=29500
+export WORLD_SIZE=\$SLURM_NPROCS
+export RANK=\$SLURM_PROCID
+#needed by megatron:
+export LOCAL_RANK=\$SLURM_LOCALID
+# Run application
+python "\$@"
+
+"""
+
+local_runscript_get_master="""
+#!/usr/bin/env python3
+# This way of starting Python should work both on LUMI and in the container, though
+# this script is really meant to be used in the container.
+
+import argparse
+def get_parser():
+    parser = argparse.ArgumentParser(description="Extract master node name from Slurm node list",
+            formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument("nodelist", help="Slurm nodelist")
+    return parser
+
+
+if __name__ == '__main__':
+    parser = get_parser()
+    args = parser.parse_args()
+
+    first_nodelist = args.nodelist.split(',')[0]
+
+    if '[' in first_nodelist:
+        a = first_nodelist.split('[')
+        first_node = a[0] + a[1].split('-')[0]
+
+    else:
+        first_node = first_nodelist
+
+    print(first_node)
+
+"""
+
+#
+# Now install does scripts and do further preparations of the container.
+#
+
+
+local_pip_requirements = """
+parameterized
+pybind11
+regex
+six
+black
+isort>=5.5.4
+packaging
+einops
+
+"""
+
+
+local_singularity_bind = '/var/spool/slurmd,/opt/cray,/usr/lib64/libcxi.so.1,/usr/lib64/libjansson.so.4,' + \
+                         '%(installdir)s/runscripts:/runscripts,' + \
+                         '/pfs,/scratch,/projappl,/project,/flash,/appl'
+
+postinstallcmds = [
+    # Install the scripts in the bin subdirectory
+    'mkdir -p %(installdir)s/bin',
+    f'cat >%(installdir)s/bin/start-shell <<EOF {local_bin_start_shell}EOF',
+    'chmod a+x %(installdir)s/bin/start-shell',    
+    f'cat >%(installdir)s/bin/make-squashfs <<EOF {local_bin_make_squashfs}EOF',
+    'chmod a+x %(installdir)s/bin/make-squashfs',    
+    f'cat >%(installdir)s/bin/unmake-squashfs <<EOF {local_bin_unmake_squashfs}EOF',
+    'chmod a+x %(installdir)s/bin/unmake-squashfs',    
+    # Install the runscripts
+    'mkdir -p %(installdir)s/runscripts',
+    f'cat >%(installdir)s/runscripts/init-venv <<EOF {local_runscript_init_venv}EOF',
+    'chmod a-x %(installdir)s/runscripts/init-venv',
+    f'cat >%(installdir)s/runscripts/python-simple <<EOF {local_runscript_python_simple}EOF',
+    'chmod a+x %(installdir)s/runscripts/python-simple',
+    f'cat >%(installdir)s/runscripts/python-distributed <<EOF {local_runscript_python_distributed}EOF',
+    'chmod a+x %(installdir)s/runscripts/python-distributed',
+    f'cat >%(installdir)s/runscripts/get-master <<EOF {local_runscript_get_master}EOF',
+    'chmod a+x %(installdir)s/runscripts/get-master',
+    # Create the virtual environment and space for other software installations that
+    # can then be packaged.
+    'mkdir -p %(installdir)s/user-software/venv',
+    # For the next command, we don't need all the bind mounts yet, just the user-software one is enough.
+    #Adding export PYTHONNOUSERSITE="true" allows global enhiretance, not .local
+    f'singularity exec --bind %(installdir)s/user-software:/user-software %(installdir)s/{local_sif} bash -c \'cd /user-software/venv ;export PYTHONNOUSERSITE="true"; python -m venv {local_venv} --system-site-packages\'',
+    f'cat >%(installdir)s/user-software/venv/requirements.txt <<EOF {local_pip_requirements}EOF',
+    f'singularity exec --bind {local_singularity_bind} --bind %(installdir)s/user-software:/user-software %(installdir)s/{local_sif} bash -c \'source /runscripts/init-venv ; cd /user-software/venv ; pip install -r requirements.txt\'',     
+    '%(installdir)s/bin/make-squashfs',
+    '/bin/rm -rf %(installdir)s/user-software',
+]
+
+sanity_check_paths = {
+    # We deliberately don't check for local_sif as the user is allowed to remove that file
+    # but may still want to regenerate the module which would then fail in the sanity check.
+    #'files': [f'share/docker-defs/{local_docker}'],
+    'files': [],
+    'dirs':  ['runscripts'],
+}
+
+modextravars = {
+    # SIF variables currently set by a function via modluafooter.
+    #'SIF':                             '%(installdir)s/' + local_sif,
+    'CONTAINERROOT':                    '%(installdir)s',
+    'RUNSCRIPTS':                       '%(installdir)s/runscripts',
+    'RUNSCRIPTSPYTORCH':                '%(installdir)s/runscripts',
+    #'SINGULARITY_BIND':                local_singularity_bind,
+    #
+    # The following two lines inject the environment variables WITH_VENV into
+    # the container that have a similar function as WITH_CONDA: the first one is the command to
+    # activate the Python virtrual environment defined by default and the second one activates
+    # both the conda and Python virtual environments, with the latter environment built on top of the
+    # former.
+    #
+    'SINGULARITYENV_WITH_VENV':         f'source /user-software/venv/{local_venv}/bin/activate',
+    #
+    # The following lines inject environment variables into the container that
+    # basically have the same effect as activating the conda environment and Python
+    # virtual environment. When these are defined in the module, WITH_CONDA, WITH_VENV or
+    # WITGH_CONDA_VENV are not really needed.
+    #
+    'SINGULARITYENV_PREPEND_PATH':      '/runscripts:/user-software/venv/pytorch/bin',
+    'SINGULARITYENV_VIRTUAL_ENV':       '/user-software/venv/pytorch',
+}
+
+modluafooter = f"""
+-- Call a routine to set the various environment variables.
+create_container_vars( '{local_sif}', 'PyTorch', '%(installdir)s', '{local_singularity_bind}' )
+"""
+
+moduleclass = 'devel'
