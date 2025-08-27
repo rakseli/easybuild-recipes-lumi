@@ -21,7 +21,7 @@
 1. Clone the repo
 2. Set up the installation location
 ```bash
-module --force purge
+module purge
 export EBU_USER_PREFIX=$HOME/EasyBuild
 ```
 3. _Add it to your `.profile` or `.bashrc` &rarr; enable  `LUMI` modules to find software installed_
